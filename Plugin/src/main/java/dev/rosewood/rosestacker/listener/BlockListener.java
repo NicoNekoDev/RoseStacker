@@ -8,19 +8,24 @@ import dev.rosewood.rosestacker.event.SpawnerStackEvent;
 import dev.rosewood.rosestacker.event.SpawnerUnstackEvent;
 import dev.rosewood.rosestacker.hook.BlockLoggingHook;
 import dev.rosewood.rosestacker.manager.ConfigurationManager.Setting;
+import dev.rosewood.rosestacker.manager.EntityCacheManager;
 import dev.rosewood.rosestacker.manager.LocaleManager;
 import dev.rosewood.rosestacker.manager.StackManager;
 import dev.rosewood.rosestacker.manager.StackSettingManager;
 import dev.rosewood.rosestacker.nms.spawner.SpawnerType;
 import dev.rosewood.rosestacker.stack.StackedBlock;
+import dev.rosewood.rosestacker.stack.StackedItem;
 import dev.rosewood.rosestacker.stack.StackedSpawner;
 import dev.rosewood.rosestacker.stack.settings.BlockStackSettings;
 import dev.rosewood.rosestacker.stack.settings.SpawnerStackSettings;
 import dev.rosewood.rosestacker.utils.ItemUtils;
 import dev.rosewood.rosestacker.utils.StackerUtils;
 import dev.rosewood.rosestacker.utils.ThreadUtils;
-import java.util.ArrayList;
-import java.util.List;
+
+import java.util.*;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
+
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
@@ -31,6 +36,9 @@ import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.block.CreatureSpawner;
 import org.bukkit.enchantments.Enchantment;
+import org.bukkit.entity.Entity;
+import org.bukkit.entity.EntityType;
+import org.bukkit.entity.Item;
 import org.bukkit.entity.Player;
 import org.bukkit.event.Event;
 import org.bukkit.event.EventHandler;
@@ -50,6 +58,7 @@ import org.bukkit.event.entity.CreatureSpawnEvent;
 import org.bukkit.event.entity.EntityChangeBlockEvent;
 import org.bukkit.event.entity.EntityExplodeEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.inventory.BlockInventoryHolder;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.util.Vector;
@@ -234,10 +243,10 @@ public class BlockListener implements Listener {
     /**
      * Tries to drop spawners that a player broke
      *
-     * @param player The Player
-     * @param dropLocation The location to drop the items
-     * @param spawnerType The type of entity the spawner spawns
-     * @param amount The amount to try to drop
+     * @param player         The Player
+     * @param dropLocation   The location to drop the items
+     * @param spawnerType    The type of entity the spawner spawns
+     * @param amount         The amount to try to drop
      * @param placedByPlayer whether or not the spawner was placed by a player
      * @return true if spawners weren't protected, false otherwise
      */
@@ -460,6 +469,32 @@ public class BlockListener implements Listener {
                         }
                     });
                 }
+            } else if (block instanceof BlockInventoryHolder holder) {
+                EntityCacheManager entityCacheManager = this.rosePlugin.getManager(EntityCacheManager.class);
+
+                Predicate<Entity> predicate = x -> x.getType() == EntityType.DROPPED_ITEM;
+                Set<StackedItem> nearbyItems = entityCacheManager.getNearbyEntities(holder.getBlock().getLocation().add(.5, .5, .5), Setting.ITEM_MERGE_RADIUS.getDouble(), predicate)
+                        .stream()
+                        .map(x -> (Item) x)
+                        .map(x -> stackManager.getStackedItems().get(x.getUniqueId()))
+                        .filter(Objects::isNull)
+                        .collect(Collectors.toSet());
+
+                Iterator<ItemStack> iter = holder.getInventory().iterator();
+
+                while (iter.hasNext()) {
+                    ItemStack itemStack = iter.next();
+                    for (StackedItem nearbyItem : nearbyItems) {
+                        if (nearbyItem.getItem().getItemStack().isSimilar(itemStack)) {
+                            if (nearbyItem.getStackSize() + itemStack.getAmount() <= nearbyItem.getStackSettings().getMaxStackSize()) {
+                                nearbyItem.increaseStackSize(itemStack.getAmount(), true);
+                                iter.remove();
+                                break;
+                            }
+                        }
+                    }
+                }
+
             }
         }
     }
